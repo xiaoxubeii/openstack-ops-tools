@@ -1,0 +1,14 @@
+[DEFAULT]
+auth_uri = http://$vip:15000
+auth_url = http://$vip:35358
+auth_region = regionOne
+auth_plugin = password
+project_domain_id = default
+user_domain_id = default
+project_name = service
+username = neutron
+password = openstack
+nova_metadata_ip = $vip
+nova_metadata_port = 18775
+metadata_proxy_shared_secret = 74fb4e4683fb4098
+state_path = $state_path

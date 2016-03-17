@@ -1,0 +1,14 @@
+# Generated file, do not edit
+HOST_IP=192.168.0.2
+SERVICE_HOST=192.168.0.1
+SERVICE_PASSWORD=openstack
+MYSQL_PASSWORD=openstack
+RABBIT_HOSTS=192.168.0.1
+SERVICE_TOKEN=openstack
+DEST=/home/xiaoxubeii/program/opt
+NEUTRON_ML2_TENANT_NETWORK_TYPE=vxlan
+OVS_ENABLE_TUNNELING=True
+
+OP_PKG_URL=http://localhost/openstack.tar.gz
+# TODO only for test
+NEUTRON_USE_ROOTWRAP=True

@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+mysql=mariadb
+my_conf=/etc/my.cnf
+
+function install_database_mysql {
+    install_package mariadb-server
+    configure_database_mysql
+}
+
+function database_connection_url_mysql {
+    local db=$1
+    echo "$BASE_SQL_CONN/$db?charset=utf8"
+}
+
+function configure_database_mysql {
+    start_service $mysql
+
+    sudo mysqladmin -u root password $DATABASE_PASSWORD || true
+    sudo mysql -uroot -p$DATABASE_PASSWORD -h127.0.0.1 -e "GRANT ALL PRIVILEGES ON *.* TO '$DATABASE_USER'@'%' identified by '$DATABASE_PASSWORD';"
+
+    iniset -sudo $my_conf mysqld bind-address "$SERVICE_LISTEN_ADDRESS"
+    iniset -sudo $my_conf mysqld sql_mode STRICT_ALL_TABLES
+    iniset -sudo $my_conf mysqld default-storage-engine InnoDB
+    iniset -sudo $my_conf mysqld max_connections 1024
+    iniset -sudo $my_conf mysqld query_cache_type OFF
+    iniset -sudo $my_conf mysqld query_cache_size 0
+
+    restart_service $mysql
+    enable_service $mysql
+}
+
+function recreate_database_mysql {
+    local db=$1
+    mysql -u$DATABASE_USER -p$DATABASE_PASSWORD -h$MYSQL_HOST -e "DROP DATABASE IF EXISTS $db;"
+    mysql -u$DATABASE_USER -p$DATABASE_PASSWORD -h$MYSQL_HOST -e "CREATE DATABASE $db CHARACTER SET utf8;"
+}
+
+function recreate_database {
+    recreate_database_mysql "$@"
+}
+
+function database_connection_url {
+    database_connection_url_mysql "$@"
+}
+
+function install_database {
+    install_database_mysql "$@"
+}
+
+function configure_database {
+    configure_database_mysql "$@"
+}
+
+function get_database_type_mysql {
+    if [[ "$MYSQL_DRIVER" == "PyMySQL" ]]; then
+        echo mysql+pymysql
+    else
+        echo mysql
+    fi
+}
+
+function initialize_mysql {
+    DATABASE_TYPE=mysql
+    # For backward-compatibility, read in the MYSQL_HOST/USER variables and use
+    # them as the default values for the DATABASE_HOST/USER variables.
+    MYSQL_HOST=${MYSQL_HOST:-$SERVICE_LOCAL_HOST}
+    MYSQL_USER=${MYSQL_USER:-root}
+
+    # Set DATABASE_HOST equal to MYSQL_HOST. If SERVICE_IP_VERSION is equal to 6,
+    # set DATABASE_HOST equal to [MYSQL_HOST]. MYSQL_HOST cannot use brackets due
+    # to mysql not using bracketing for IPv6 addresses. DATABASE_HOST must have brackets
+    # due to sqlalchemy only reading IPv6 addresses with brackets.
+    if [[ "$SERVICE_IP_VERSION" == 6 ]]; then
+        DATABASE_HOST=${DATABASE_HOST:-[$MYSQL_HOST]}
+    else
+        DATABASE_HOST=${DATABASE_HOST:-${MYSQL_HOST}}
+    fi
+
+    DATABASE_USER=${DATABASE_USER:-${MYSQL_USER}}
+
+    DATABASE_PASSWORD=$MYSQL_PASSWORD
+
+    # We configure Nova, Horizon, Glance and Keystone to use MySQL as their
+    # database server.  While they share a single server, each has their own
+    # database and tables.
+
+    # By default this script will install and configure MySQL.  If you want to
+    # use an existing server, you can pass in the user/password/host parameters.
+    # You will need to send the same ``DATABASE_PASSWORD`` to every host if you are doing
+    # a multi-node DevStack installation.
+
+    # NOTE: Don't specify ``/db`` in this string so we can use it for multiple services
+    BASE_SQL_CONN=${BASE_SQL_CONN:-$(get_database_type_$DATABASE_TYPE)://$DATABASE_USER:$DATABASE_PASSWORD@$DATABASE_HOST}
+
+    return 0
+}

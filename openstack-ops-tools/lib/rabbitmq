@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+rabbitmq=rabbitmq-server
+RABBIT_HA_QUEUES=${RABBIT_HA_QUEUES:-True}
+
+function install_rpc_rabbitmq {
+    install_package rabbitmq-server
+    start_service rabbitmq-server
+    enable_service rabbitmq-server
+}
+
+function get_transport_url_rabbit {
+    echo "rabbit://$RABBIT_HOST:5672/"
+}
+
+function iniset_rpc_rabbitmq {
+    local package=$1
+    local file=$2
+    local section=${3:-DEFAULT}
+    iniset $file $section rpc_backend "rabbit"
+    iniset $file oslo_messaging_rabbit rabbit_hosts $RABBIT_HOSTS
+    iniset $file oslo_messaging_rabbit rabbit_ha_queues $RABBIT_HA_QUEUES
+}
+
+function install_rpc {
+    install_rpc_rabbitmq
+}
+
+function iniset_rpc {
+    iniset_rpc_rabbitmq "$@"
+}
+
+function get_transport_url {
+    get_transport_url_rabbit "$@"
+}

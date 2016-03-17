@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Keep track of the DevStack directory
+TOP_DIR=$(cd $(dirname "$0")/.. && pwd)
+
+# Import common functions
+source $TOP_DIR/utils/functions
+
+# Needed to get ``ENABLED_SERVICES`` and ``STACK_USER``
+source $TOP_DIR/stackrc
+
+if ! getent group $STACK_USER >/dev/null; then
+    echo "Creating a group called $STACK_USER"
+    groupadd $STACK_USER
+fi
+
+if ! getent passwd $STACK_USER >/dev/null; then
+    echo "Creating a user called $STACK_USER"
+    useradd -g $STACK_USER -s /bin/bash -d $DEST -m $STACK_USER
+fi
+
+echo "Giving stack user passwordless sudo privileges"
+# UEC images ``/etc/sudoers`` does not have a ``#includedir``, add one
+grep -q "^#includedir.*/etc/sudoers.d" /etc/sudoers ||
+    echo "#includedir /etc/sudoers.d" >> /etc/sudoers
+( umask 226 && echo "$STACK_USER ALL=(ALL) NOPASSWD:ALL" \
+    > /etc/sudoers.d/50_stack_sh )

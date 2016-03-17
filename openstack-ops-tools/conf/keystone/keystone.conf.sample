@@ -1,0 +1,21 @@
+[DEFAULT]
+use_syslog = true
+syslog_log_facility = LOG_LOCAL4
+debug = true
+verbose = true
+admin_token = e154b7baebbaaaa8eddb
+verbose = true
+log_dir = $log_dir
+
+[database]
+connection = mysql://keystone:hpinvent@$vip/keystone
+
+[memcache]
+servers = $servers
+
+[token]
+provider = keystone.token.providers.uuid.Provider
+driver = keystone.token.persistence.backends.memcache.Token
+
+[revoke]
+driver = keystone.contrib.revoke.backends.sql.Revoke

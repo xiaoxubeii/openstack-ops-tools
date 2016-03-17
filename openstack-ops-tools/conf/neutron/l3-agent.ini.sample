@@ -1,0 +1,6 @@
+[DEFAULT]
+interface_driver = neutron.agent.linux.interface.OVSInterfaceDriver
+external_network_bridge = br-ex
+router_delete_namespaces = true
+state_path = $state_path
+enable_metadata_proxy = false

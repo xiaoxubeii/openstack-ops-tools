@@ -1,0 +1,37 @@
+$ModLoad imudp
+$UDPServerAddress $ext_ip
+$UDPServerRun 514
+
+$template NovaFile,"/var/log/rsyslog/%HOSTNAME%/nova.log"
+$template NovaAll,"/var/log/rsyslog/nova.log"
+
+$template NeutronFile,"/var/log/rsyslog/%HOSTNAME%/neutron.log"
+$template NeutronAll,"/var/log/rsyslog/neutron.log"
+
+$template KeystoneFile,"/var/log/rsyslog/%HOSTNAME%/keystone.log"
+$template KeystoneAll,"/var/log/rsyslog/keystone.log"
+
+$template GlanceFile,"/var/log/rsyslog/%HOSTNAME%/glance.log"
+$template GlanceAll,"/var/log/rsyslog/glance.log"
+
+$template CinderFile,"/var/log/rsyslog/%HOSTNAME%/cinder.log"
+$template CinderAll,"/var/log/rsyslog/cinder.log"
+
+$template DynFile,"/var/log/rsyslog/%HOSTNAME%/syslog.log"
+*.* ?DynFile
+
+local0.* ?NovaFile
+local0.* ?NovaAll
+
+local1.* ?NeutronFile
+local1.* ?NeutronAll
+
+local2.* ?GlanceFile
+local2.* ?GlanceAll
+
+local3.* ?CinderFile
+local3.* ?CinderAll
+
+local4.* ?KeystoneFile
+local4.* ?KeystoneAll
+& ~

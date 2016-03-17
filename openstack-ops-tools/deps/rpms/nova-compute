@@ -1,0 +1,7 @@
+cryptsetup
+genisoimage
+iscsi-initiator-utils
+lvm2
+sg3_utils
+# Stuff for diablo volumes
+sysfsutils

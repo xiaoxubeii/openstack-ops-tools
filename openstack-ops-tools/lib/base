@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+function install_base {
+    sudo curl $OP_PKG_URL | tar xz -C $DEST
+}
+
+function init_base {
+    mkdir -p $DATA_DIR
+}
+
+function start_base {
+    start_service iptables
+}

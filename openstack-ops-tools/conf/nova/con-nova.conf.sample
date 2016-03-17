@@ -1,0 +1,44 @@
+[DEFAULT]
+verbose = True
+my_ip = $my_ip
+state_path = $state_path
+log_dir = $log_dir
+rpc_backend = rabbit
+auth_strategy = keystone
+network_api_class = nova.network.neutronv2.api.API
+security_group_api = neutron
+linuxnet_interface_driver = nova.network.linux_net.LinuxOVSInterfaceDriver
+firewall_driver = nova.virt.firewall.NoopFirewallDriver
+service_metadata_proxy = true
+metadata_proxy_shared_secret = 74fb4e4683fb4098
+
+[oslo_messaging_rabbit]
+rabbit_hosts = $rabbit_hosts
+rabbit_ha_queues = true
+
+
+[database]
+connection = mysql://nova:hpinvent@$vip/nova
+[keystone_authtoken]
+auth_uri = http://$vip:15000
+auth_url = http://$vip:35358
+auth_plugin = password
+project_domain_id = default
+user_domain_id = default
+project_name = service
+username = nova
+password = openstack
+
+[glance]
+host = $vip
+
+[oslo_concurrency]
+lock_path=$state_path/lock
+
+[neutron]
+url = http://$vip:19696
+auth_strategy = keystone
+admin_auth_url = http://$vip:35358/v2.0
+admin_tenant_name = service
+admin_username = neutron
+admin_password = openstack

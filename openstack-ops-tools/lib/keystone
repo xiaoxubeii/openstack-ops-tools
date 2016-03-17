@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+KEYSTONE_DIR=$DEST/keystone
+
+KEYSTONE_CONF_DIR=${KEYSTONE_CONF_DIR:-/etc/keystone}
+KEYSTONE_CONF=$KEYSTONE_CONF_DIR/keystone.conf
+KEYSTONE_PASTE_INI=${KEYSTONE_PASTE_INI:-$KEYSTONE_CONF_DIR/keystone-paste.ini}
+KEYSTONE_STATE_PATH=${KEYSTONE_STATE_PATH:-$DATA_DIR/keystone}
+KEYSTONE_LOG_DIR=${LOG_DIR}/keystone
+
+PROJECT_VENV["keystone"]=${KEYSctlTONE_DIR}/keystone.venv
+KEYSTONE_BIN_DIR=${PROJECT_VENV["keystone"]}/bin
+
+# Select the token persistence backend driver
+KEYSTONE_TOKEN_BACKEND=${KEYSTONE_TOKEN_BACKEND:-keystone.token.persistence.backends.sql.Token}
+KEYSTONE_CATALOG_BACKEND=${KEYSTONE_CATALOG_BACKEND:-sql}
+
+# Select the Identity backend driver
+KEYSTONE_IDENTITY_BACKEND=${KEYSTONE_IDENTITY_BACKEND:-sql}
+
+# Select Keystone's token provider (and format)
+# Choose from 'uuid', 'pki', 'pkiz', or 'fernet'
+KEYSTONE_TOKEN_FORMAT=${KEYSTONE_TOKEN_FORMAT:-}
+KEYSTONE_TOKEN_FORMAT=$(echo ${KEYSTONE_TOKEN_FORMAT} | tr '[:upper:]' '[:lower:]')
+
+# Set Keystone interface configuration
+KEYSTONE_AUTH_HOST=${KEYSTONE_AUTH_HOST:-$SERVICE_HOST}
+KEYSTONE_AUTH_PORT=${KEYSTONE_AUTH_PORT:-35357}
+KEYSTONE_AUTH_PORT_INT=${KEYSTONE_AUTH_PORT_INT:-35358}
+KEYSTONE_AUTH_PROTOCOL=${KEYSTONE_AUTH_PROTOCOL:-$SERVICE_PROTOCOL}
+
+# Public facing bits
+KEYSTONE_SERVICE_HOST=${KEYSTONE_SERVICE_HOST:-$SERVICE_HOST}
+KEYSTONE_SERVICE_PORT=${KEYSTONE_SERVICE_PORT:-5000}
+KEYSTONE_SERVICE_PORT_INT=${KEYSTONE_SERVICE_PORT_INT:-5001}
+KEYSTONE_SERVICE_PROTOCOL=${KEYSTONE_SERVICE_PROTOCOL:-$SERVICE_PROTOCOL}
+
+# Bind hosts
+KEYSTONE_ADMIN_BIND_HOST=${KEYSTONE_ADMIN_BIND_HOST:-$KEYSTONE_SERVICE_HOST}
+# Set the tenant for service accounts in Keystone
+SERVICE_TENANT_NAME=${SERVICE_TENANT_NAME:-service}
+
+# complete URIs
+KEYSTONE_AUTH_URI=${KEYSTONE_AUTH_PROTOCOL}://${KEYSTONE_AUTH_HOST}:${KEYSTONE_AUTH_PORT}
+KEYSTONE_SERVICE_URI=${KEYSTONE_SERVICE_PROTOCOL}://${KEYSTONE_SERVICE_HOST}:${KEYSTONE_SERVICE_PORT}
+
+# V3 URIs
+KEYSTONE_AUTH_URI_V3=$KEYSTONE_AUTH_URI/v3
+KEYSTONE_SERVICE_URI_V3=$KEYSTONE_SERVICE_URI/v3
+
+
+# Functions
+# ---------
+
+# Test if Keystone is enabled
+# is_keystone_enabled
+function is_keystone_enabled {
+    [[ ,${ENABLED_SERVICES}, =~ ,"keystone", ]] && return 0
+    return 1
+}
+
+# configure_keystone() - Set config files, create data dirs, etc
+function configure_keystone {
+    useradd -s /sbin/nologin -b $DATA_DIR -U -m keystone
+
+    sudo install -d -o keystone -g keystone $KEYSTONE_CONF_DIR
+
+    cp -p $KEYSTONE_DIR/etc/policy.json $KEYSTONE_CONF_DIR
+    cp -p "$KEYSTONE_DIR/etc/keystone-paste.ini" "$KEYSTONE_PASTE_INI"
+    if [[ -f "$KEYSTONE_PASTE_INI" ]]; then
+        iniset "$KEYSTONE_CONF" paste_deploy config_file "$KEYSTONE_PASTE_INI"
+    else
+        # compatibility with mixed cfg and paste.deploy configuration
+        KEYSTONE_PASTE_INI="$KEYSTONE_CONF"
+    fi
+
+    if [ "$ENABLE_IDENTITY_V2" == "False" ]; then
+        # Only Identity v3 API should be available; then disable v2 pipelines
+        inidelete $KEYSTONE_PASTE_INI composite:main \\/v2.0
+        inidelete $KEYSTONE_PASTE_INI composite:admin \\/v2.0
+    fi
+
+    rm -f $KEYSTONE_CONF
+    iniset_rpc keystone $KEYSTONE_CONF
+    iniset $KEYSTONE_CONF DEFAULT admin_token "$SERVICE_TOKEN"
+    iniset $KEYSTONE_CONF database connection `database_connection_url keystone`
+    iniset $KEYSTONE_CONF token driver "$KEYSTONE_TOKEN_BACKEND"
+    iniset $KEYSTONE_CONF DEFAULT debug $ENABLE_DEBUG_LOG_LEVEL
+    iniset $KEYSTONE_CONF DEFAULT use_syslog $SYSLOG
+    iniset $KEYSTONE_CONF DEFAULT verbose $ENABLE_VERBOSE
+    iniset $KEYSTONE_CONF DEFAULT state_path $KEYSTONE_STATE_PATH
+    iniset $KEYSTONE_CONF oslo_concurrency lock_path $KEYSTONE_STATE_PATH/lock
+    iniset $KEYSTONE_CONF DEFAULT log_dir $KEYSTONE_LOG_DIR
+
+    if [[ "$KEYSTONE_TOKEN_FORMAT" != "" ]]; then
+        iniset $KEYSTONE_CONF token provider $KEYSTONE_TOKEN_FORMAT
+    fi
+
+    iniset $KEYSTONE_CONF eventlet_server admin_workers "$API_WORKERS"
+
+    chown -R keystone:keystone $KEYSTONE_CONF_DIR
+    _configure_keystone_initserv
+}
+
+function _configure_keystone_initserv {
+    if is_service_enabled keystone; then
+        local initserv
+        initserv=$INITSERVICE_DIR/openstack-keystone.service
+        configure_initserv $initserv
+        iniset "-sudo" $initserv Service User "keystone"
+        iniset "-sudo" $initserv Service ExecStart "$KEYSTONE_BIN_DIR/keystone-all"
+    fi
+}
+
+# create_keystone_accounts() - Sets up common required keystone accounts
+
+# Tenant               User       Roles
+# ------------------------------------------------------------------
+# admin                admin      admin
+# service              --         --
+# --                   --         service
+# --                   --         ResellerAdmin
+# --                   --         Member
+# demo                 admin      admin
+# demo                 demo       Member, anotherrole
+# invisible_to_admin   demo       Member
+
+# Group                Users      Roles                 Tenant
+# ------------------------------------------------------------------
+# admins               admin      admin                 admin
+# nonadmins            demo       Member, anotherrole   demo
+
+
+# Migrated from keystone_data.sh
+function create_keystone_accounts {
+
+    # admin
+    local admin_tenant
+    admin_tenant=$(get_or_create_project "admin" default)
+    local admin_user
+    admin_user=$(get_or_create_user "admin" "$ADMIN_PASSWORD" default)
+    local admin_role
+    admin_role=$(get_or_create_role "admin")
+    get_or_add_user_project_role $admin_role $admin_user $admin_tenant
+
+    # Create service project/role
+    get_or_create_project "$SERVICE_TENANT_NAME" default
+
+    # Service role, so service users do not have to be admins
+    get_or_create_role service
+
+    # The ResellerAdmin role is used by Nova and Ceilometer so we need to keep it.
+    # The admin role in swift allows a user to act as an admin for their tenant,
+    # but ResellerAdmin is needed for a user to act as any tenant. The name of this
+    # role is also configurable in swift-proxy.conf
+    get_or_create_role ResellerAdmin
+
+    # The Member role is used by Horizon and Swift so we need to keep it:
+    local member_role
+    member_role=$(get_or_create_role "Member")
+
+    # another_role demonstrates that an arbitrary role may be created and used
+    # TODO(sleepsonthefloor): show how this can be used for rbac in the future!
+    local another_role
+    another_role=$(get_or_create_role "anotherrole")
+
+    # invisible tenant - admin can't see this one
+    local invis_tenant
+    invis_tenant=$(get_or_create_project "invisible_to_admin" default)
+
+    # demo
+    local demo_tenant
+    demo_tenant=$(get_or_create_project "demo" default)
+    local demo_user
+    demo_user=$(get_or_create_user "demo" \
+        "$ADMIN_PASSWORD" "default" "demo@example.com")
+
+    get_or_add_user_project_role $member_role $demo_user $demo_tenant
+    get_or_add_user_project_role $admin_role $admin_user $demo_tenant
+    get_or_add_user_project_role $another_role $demo_user $demo_tenant
+    get_or_add_user_project_role $member_role $demo_user $invis_tenant
+
+    # Keystone
+    if [[ "$KEYSTONE_CATALOG_BACKEND" = 'sql' ]]; then
+
+        get_or_create_service "keystone" "identity" "Keystone Identity Service"
+        get_or_create_endpoint "identity" \
+            "$REGION_NAME" \
+            "$KEYSTONE_SERVICE_PROTOCOL://$KEYSTONE_SERVICE_HOST:$KEYSTONE_SERVICE_PORT/v$IDENTITY_API_VERSION" \
+            "$KEYSTONE_AUTH_PROTOCOL://$KEYSTONE_AUTH_HOST:$KEYSTONE_AUTH_PORT/v$IDENTITY_API_VERSION" \
+            "$KEYSTONE_SERVICE_PROTOCOL://$KEYSTONE_SERVICE_HOST:$KEYSTONE_SERVICE_PORT/v$IDENTITY_API_VERSION"
+    fi
+}
+
+# Create a user that is capable of verifying keystone tokens for use with auth_token middleware.
+#
+# create_service_user <name> [role]
+#
+# The role defaults to the service role. It is allowed to be provided as optional as historically
+# a lot of projects have configured themselves with the admin or other role here if they are
+# using this user for other purposes beyond simply auth_token middleware.
+function create_service_user {
+    local role=${2:-service}
+
+    local user
+    user=$(get_or_create_user "$1" "$SERVICE_PASSWORD" default)
+    get_or_add_user_project_role "$role" "$user" "$SERVICE_TENANT_NAME"
+}
+
+# Configure the service to use the auth token middleware.
+#
+# configure_auth_token_middleware conf_file admin_user signing_dir [section]
+#
+# section defaults to keystone_authtoken, which is where auth_token looks in
+# the .conf file. If the paste config file is used (api-paste.ini) then
+# provide the section name for the auth_token filter.
+function configure_auth_token_middleware {
+    local conf_file=$1
+    local admin_user=$2
+    local section=${4:-keystone_authtoken}
+
+    iniset $conf_file $section auth_plugin password
+    iniset $conf_file $section auth_url $KEYSTONE_AUTH_URI
+    iniset $conf_file $section username $admin_user
+    iniset $conf_file $section password $SERVICE_PASSWORD
+    iniset $conf_file $section user_domain_id default
+    iniset $conf_file $section project_name $SERVICE_TENANT_NAME
+    iniset $conf_file $section project_domain_id default
+
+    iniset $conf_file $section auth_uri $KEYSTONE_SERVICE_URI
+}
+
+# init_keystone() - Initialize databases, etc.
+function init_keystone {
+    install -d -o keystone -g keystone $KEYSTONE_LOG_DIR
+
+    # (Re)create keystone database
+    recreate_database keystone
+
+    # Initialize keystone database
+    $KEYSTONE_BIN_DIR/keystone-manage db_sync
+
+    if [[ "$KEYSTONE_TOKEN_FORMAT" == "pki" || "$KEYSTONE_TOKEN_FORMAT" == "pkiz" ]]; then
+        # Set up certificates
+        rm -rf $KEYSTONE_CONF_DIR/ssl
+        $KEYSTONE_BIN_DIR/keystone-manage pki_setup
+    fi
+}
+
+# install_keystone() - Collect source and prepare
+function install_keystone {
+    if [[ "$KEYSTONE_TOKEN_BACKEND" = "memcache" ]]; then
+        # Install memcached and the memcache Python library that keystone uses.
+        # Unfortunately the Python library goes by different names in the .deb
+        # and .rpm circles.
+        install_package memcached
+    fi
+}
+
+function start_keystone {
+    start_opservice keystone
+    enable_opservice keystone
+}
+
+function stop_keystone {
+    stop_opservice keystone
+}

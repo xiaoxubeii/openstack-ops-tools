@@ -1,0 +1,83 @@
+#!/bin/bash
+OVS_BRIDGE=${OVS_BRIDGE:-br-int}
+# OVS recognize default 'system' datapath or 'netdev' for userspace datapath
+OVS_DATAPATH_TYPE=${OVS_DATAPATH_TYPE:-system}
+OVS_TUNNEL_BRIDGE=${OVS_TUNNEL_BRIDGE:-br-tun}
+
+function is_neutron_ovs_base_plugin {
+    # Yes, we use OVS.
+    return 0
+}
+
+function _neutron_ovs_base_add_bridge {
+    local bridge=$1
+    local addbr_cmd="sudo ovs-vsctl --no-wait -- --may-exist add-br $bridge"
+
+    if [ "$OVS_DATAPATH_TYPE" != "system" ] ; then
+        addbr_cmd="$addbr_cmd -- set Bridge $bridge datapath_type=${OVS_DATAPATH_TYPE}"
+    fi
+
+    $addbr_cmd
+}
+
+function _neutron_ovs_base_setup_bridge {
+    local bridge=$1
+    neutron-ovs-cleanup
+    _neutron_ovs_base_add_bridge $bridge
+    sudo ovs-vsctl --no-wait br-set-external-id $bridge bridge-id $bridge
+}
+
+function neutron_ovs_base_cleanup {
+    # remove all OVS ports that look like Neutron created ports
+    for port in $(sudo ovs-vsctl list port | grep -o -e [a-zA-Z\-]*tap[0-9a-f\-]* -e q[rg]-[0-9a-f\-]*); do
+        sudo ovs-vsctl del-port ${port}
+    done
+
+    # remove all OVS bridges created by Neutron
+    for bridge in $(sudo ovs-vsctl list-br | grep -o -e ${OVS_BRIDGE} -e ${PUBLIC_BRIDGE} -e ${OVS_TUNNEL_BRIDGE}); do
+        sudo ovs-vsctl del-br ${bridge}
+    done
+}
+
+function _neutron_ovs_base_install_agent_packages {
+    # Install deps
+    install_package $(get_packages "openvswitch")
+    restart_service openvswitch-switch
+}
+
+function _neutron_ovs_base_configure_firewall_driver {
+    if [[ "$NEUTRON_USE_SECGROUP" == "True" ]]; then
+        iniset /$NEUTRON_PLUGIN_CONF_FILE securitygroup firewall_driver neutron.agent.linux.iptables_firewall.OVSHybridIptablesFirewallDriver
+    else
+        iniset /$NEUTRON_PLUGIN_CONF_FILE securitygroup firewall_driver neutron.agent.firewall.NoopFirewallDriver
+    fi
+}
+
+function _neutron_ovs_base_configure_l3_agent {
+    if [ "$NEUTRON_USE_PROVIDERNET_FOR_PUBLIC" = "True" ]; then
+        iniset $NEUTRON_L3_CONF_FILE DEFAULT external_network_bridge ""
+    else
+        iniset $NEUTRON_L3_CONF_FILE DEFAULT external_network_bridge $PUBLIC_BRIDGE
+    fi
+
+    #TODO
+    #neutron-ovs-cleanup
+
+    if [[ "$NEUTRON_USE_PUBLIC_VETH" = "True" ]]; then
+        ip link show $NEUTRON_PUBLIC_VETH_INT > /dev/null 2>&1 ||
+        sudo ip link add $NEUTRON_PUBLIC_VETH_INT type veth \
+            peer name $NEUTRON_PUBLIC_VETH_EX
+        sudo ip link set $NEUTRON_PUBLIC_VETH_INT up
+        sudo ip link set $NEUTRON_PUBLIC_VETH_EX up
+        sudo ip addr flush dev $NEUTRON_PUBLIC_VETH_EX
+    else
+        :
+        #TODO
+        #_neutron_ovs_base_add_bridge $PUBLIC_BRIDGE
+        #sudo ovs-vsctl br-set-external-id $PUBLIC_BRIDGE bridge-id $PUBLIC_BRIDGE
+    fi
+}
+
+function _neutron_ovs_base_configure_nova_vif_driver {
+    :
+}

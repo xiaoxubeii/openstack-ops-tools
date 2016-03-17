@@ -1,0 +1,7 @@
+##!/usr/bin/env bash
+DEPS=$TOP_DIR/deps
+PACKAGES=$(get_packages general,$ENABLED_SERVICES)
+PACKAGES="$PACKAGES linux-headers-$(uname -r)"
+install_package $PACKAGES
+install_package rsyslog-relp
+

@@ -1,0 +1,50 @@
+[DEFAULT]
+use_syslog = true
+syslog_log_facility = LOG_LOCAL1
+debug = true
+verbose = true
+rpc_backend = rabbit
+core_plugin = ml2
+service_plugins = router
+allow_overlapping_ips = true
+notify_nova_on_port_status_changes = true
+notify_nova_on_port_data_changes = true
+nova_url = http://$vip:18774/v2
+auth_strategy = keystone
+log_dir = $log_dir
+state_path = $state_path
+dhcp_agents_per_network = $dhcp_agents_per_network
+l3_ha = true
+max_l3_agents_per_router = 2
+min_l3_agents_per_router = 2
+
+[keystone_authtoken]
+auth_uri = http://$vip:1500
+0
+auth_url = http://$vip:35358
+auth_plugin = password
+project_domain_id = default
+user_domain_id = default
+project_name = service
+username = neutron
+password = openstack
+
+[oslo_messaging_rabbit]
+rabbit_hosts = $rabbit_hosts
+rabbit_ha_queues = true
+
+[database]
+connection = mysql://neutron:hpinvent@$vip/neutron
+
+[nova]
+auth_url = http://$vip:35358
+auth_plugin = password
+project_domain_id = default
+user_domain_id = default
+region_name = regionOne
+project_name = service
+username = nova
+password = openstack
+
+[oslo_concurrency]
+lock_path = $state_path/lock

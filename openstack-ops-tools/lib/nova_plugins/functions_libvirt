@@ -1,0 +1,66 @@
+#!/bin/bash
+# Defaults
+# --------
+
+# Turn on selective debug log filters for libvirt.
+# (NOTE: Enabling this by default, because the log filters enabled in
+# 'configure_libvirt' function further below are _selective_ and not
+# extremely verbose.)
+DEBUG_LIBVIRT=$(trueorfalse True DEBUG_LIBVIRT)
+
+# Installs required distro-specific libvirt packages.
+function install_libvirt {
+    install_package kvm
+    install_package qemu-kvm
+    install_package libvirt libvirt-devel
+}
+
+# Configures the installed libvirt system so that is accessible by
+# STACK_USER via qemu:///system with management capabilities.
+function configure_libvirt {
+    if is_service_enabled neutron && is_neutron_ovs_base_plugin && ! sudo grep -q '^cgroup_device_acl' $QEMU_CONF; then
+        # Add /dev/net/tun to cgroup_device_acls, needed for type=ethernet interfaces
+        cat <<EOF | sudo tee -a $QEMU_CONF
+cgroup_device_acl = [
+    "/dev/null", "/dev/full", "/dev/zero",
+    "/dev/random", "/dev/urandom",
+    "/dev/ptmx", "/dev/kvm", "/dev/kqemu",
+    "/dev/rtc", "/dev/hpet","/dev/net/tun",
+]
+EOF
+    fi
+
+    LIBVIRT_DAEMON=libvirtd
+    # The user that nova runs as needs to be member of **libvirtd** group otherwise
+    # nova-compute will be unable to use libvirt.
+    if ! getent group $LIBVIRT_GROUP >/dev/null; then
+        sudo groupadd $LIBVIRT_GROUP
+    fi
+    add_user_to_group nova $LIBVIRT_GROUP
+
+    # Update the libvirt cpu map with a gate64 cpu model. This enables nova
+    # live migration for 64bit guest OSes on heterogenous cloud "hardware".
+    if [[ -f /usr/share/libvirt/cpu_map.xml ]] ; then
+        sudo $TOP_DIR/tools/cpu_map_update.py /usr/share/libvirt/cpu_map.xml
+    fi
+
+    LIBVIRTD_CONF=/etc/libvirt/libvirtd.conf
+    sudo sed -i '/^#listen_tls *=.*$/a listen_tls = 0' $LIBVIRTD_CONF
+    sudo sed -i '/^#listen_tcp *=.*$/a listen_tcp = 1' $LIBVIRTD_CONF
+    sudo sed -i '/^#tcp_port *=.*$/a tcp_port = "16509"' $LIBVIRTD_CONF
+    sudo sed -i '/^#listen_addr *=.*$/a listen_addr = "0.0.0.0"' $LIBVIRTD_CONF
+    sudo sed -i '/^#auth_unix_ro *=.*$/a auth_unix_ro = "none"' $LIBVIRTD_CONF
+    sudo sed -i '/^#auth_unix_rw *=.*$/a auth_unix_rw = "none"' $LIBVIRTD_CONF
+    sudo sed -i '/^#auth_tcp *=.*$/a auth_tcp = "none"' $LIBVIRTD_CONF
+
+
+    LIBVIRTD_SYSCONF=/etc/sysconfig/libvirtd
+    sudo sed -i '/^#LIBVIRTD_ARGS *=.*$/a LIBVIRTD_ARGS = "--listen"' $LIBVIRTD_SYSCONF
+
+    # libvirt detects various settings on startup, as we potentially changed
+    # the system configuration (modules, filesystems), we need to restart
+    # libvirt to detect those changes. Use a stop start as otherwise the new
+    # cpu_map is not loaded properly on some systems (Ubuntu).
+    stop_service $LIBVIRT_DAEMON
+    start_service $LIBVIRT_DAEMON
+}

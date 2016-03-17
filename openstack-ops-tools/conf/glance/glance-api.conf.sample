@@ -1,0 +1,33 @@
+[DEFAULT]
+use_syslog = true
+syslog_log_facility = LOG_LOCAL2
+verbose = true
+notification_driver = noop
+log_dir = $log_dir
+enable_v1_api = true
+enable_v2_api = true
+registry_host = $vip
+registry_port = 19191
+
+[database]
+connection = mysql://glance:hpinvent@$vip/glance
+
+[oslo_concurrency]
+lock_path = $lock_path
+
+[keystone_authtoken]
+auth_uri = http://$vip:15000
+auth_url = http://$vip:35358
+auth_plugin = password
+project_domain_id = default
+user_domain_id = default
+project_name = service
+username = glance
+password = openstack
+
+[paste_deploy]
+flavor = keystone
+
+[glance_store]
+default_store = file
+filesystem_store_datadir = $filesystem_store_datadir

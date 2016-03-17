@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+config.section.$type
+op=$1
+
+for m in "${modules[@]}"
+do
+    IFS=', *' read -ra services <<< ${!m}
+    if [ "$service" = "keystone" ];then
+        service="openstack-$m"
+        if [ $op = "status" ];then
+            systemctl status $service|awk -F"\n" 'NR==1||NR==3{print $0 }'
+        else
+            systemctl $op openstack-$service
+        fi
+    else
+        for service in "${services[@]}"
+        do
+            case "$m" in
+            "neutron" )
+                service="$m-$service"
+                ;;
+            "*" )
+                service="openstack-$m-$service"
+                ;;
+            esac
+
+            if [ $op = "status" ];then
+                systemctl status $service|awk -F"\n" 'NR==1||NR==3{print $0 }'
+            else
+                systemctl $op openstack-$service
+            fi
+        done
+    fi
+done
+

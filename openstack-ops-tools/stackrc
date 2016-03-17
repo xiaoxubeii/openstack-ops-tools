@@ -1,0 +1,163 @@
+#!/bin/bash
+#
+# stackrc
+#
+
+# ensure we don't re-source this in the same environment
+[[ -z "$_DEVSTACK_STACKRC" ]] || return 0
+declare -r _DEVSTACK_STACKRC=1
+
+# Sanitize language settings to avoid commands bailing out
+# with "unsupported locale setting" errors.
+unset LANG
+unset LANGUAGE
+LC_ALL=C
+export LC_ALL
+
+# Find the other rc files
+RC_DIR=$(cd $(dirname "${BASH_SOURCE:-$0}") && pwd)
+
+# Source required DevStack functions and globals
+source $RC_DIR/utils/functions
+
+# This allows us to pass ``ENABLED_SERVICES``
+if ! isset ENABLED_SERVICES ; then
+    # Keystone - nothing works without keystone
+    ENABLED_SERVICES=keystone
+    # Nova - services to support libvirt based openstack clouds
+    ENABLED_SERVICES+=,nova-api,nova-compute,nova-conductor,nova-scheduler,nova-novncproxy,nova-cert,nova-consoleauth
+    ENABLED_SERVICES+=,neutron-server,neutron-l3-agent,neutron-dhcp-agent,neutron-openvswitch-agent,neutron-metadata-agent
+    # Glance services needed for Nova
+    ENABLED_SERVICES+=,glance-api,glance-registry
+    # Cinder
+    ENABLED_SERVICES+=,cinder-scheduler,cinder-api,cinder-volume
+    # Additional services
+    ENABLED_SERVICES+=,rabbitmq,mysql
+fi
+
+# Set the default Nova APIs to enable
+NOVA_ENABLED_APIS=ec2,osapi_compute,metadata
+
+# allow local overrides of env variables, including repo config
+if [[ -f $RC_DIR/localrc ]]; then
+    # Old-style user-supplied config
+    source $RC_DIR/localrc
+elif [[ -f $RC_DIR/.localrc.auto ]]; then
+    # New-style user-supplied config extracted from local.conf
+    source $RC_DIR/.localrc.auto
+fi
+
+# Destination path for installation
+DEST=${DEST:-/opt/stack}
+
+# Destination for working data
+DATA_DIR=${DEST}/data
+
+# Destination for status files
+SERVICE_DIR=${DEST}/status
+
+INITSERVICE_DIR=/usr/lib/systemd/system
+
+# Determine stack user
+if [[ $EUID -eq 0 ]]; then
+    STACK_USER=stack
+else
+    STACK_USER=$(whoami)
+fi
+
+# Specify region name Region
+REGION_NAME=${REGION_NAME:-RegionOne}
+
+# Configure Identity API version: 2.0, 3
+IDENTITY_API_VERSION=${IDENTITY_API_VERSION:-2.0}
+
+# Set the option ENABLE_IDENTITY_V2 to True. It defines whether the DevStack
+# deployment will be deploying the Identity v2 pipelines. If this option is set
+# to ``False``, DevStack will: i) disable Identity v2; ii) configure Tempest to
+# skip Identity v2 specific tests; and iii) configure Horizon to use Identity
+# v3. When this option is set to ``False``, the option IDENTITY_API_VERSION
+# will to be set to ``3`` in order to make DevStack register the Identity
+# endpoint as v3. This flag is experimental and will be used as basis to
+# identify the projects which still have issues to operate with Identity v3.
+ENABLE_IDENTITY_V2=$(trueorfalse True ENABLE_IDENTITY_V2)
+if [ "$ENABLE_IDENTITY_V2" == "False" ]; then
+    IDENTITY_API_VERSION=3
+fi
+
+# Nova hypervisor configuration.  We default to libvirt with **kvm** but will
+# drop back to **qemu** if we are unable to load the kvm module.  ``stack.sh`` can
+# also install an **LXC**, **OpenVZ** or **XenAPI** based system.  If xenserver-core
+# is installed, the default will be XenAPI
+DEFAULT_VIRT_DRIVER=libvirt
+VIRT_DRIVER=${VIRT_DRIVER:-$DEFAULT_VIRT_DRIVER}
+case "$VIRT_DRIVER" in
+    libvirt)
+        LIBVIRT_TYPE=${LIBVIRT_TYPE:-kvm}
+        LIBVIRT_GROUP=libvirtd
+        ;;
+esac
+
+# Set default screen name
+SCREEN_NAME=${SCREEN_NAME:-stack}
+
+# Allow the use of an alternate protocol (such as https) for service endpoints
+SERVICE_PROTOCOL=${SERVICE_PROTOCOL:-http}
+
+# Sets the maximum number of workers for most services to reduce
+# the memory used where there are a large number of CPUs present
+# (the default number of workers for many services is the number of CPUs)
+# Also sets the minimum number of workers to 2.
+API_WORKERS=${API_WORKERS:=$(( ($(nproc)/4)<2 ? 2 : ($(nproc)/4) ))}
+
+# Service startup timeout
+SERVICE_TIMEOUT=${SERVICE_TIMEOUT:-60}
+
+# Service graceful shutdown timeout
+SERVICE_GRACEFUL_SHUTDOWN_TIMEOUT=${SERVICE_GRACEFUL_SHUTDOWN_TIMEOUT:-5}
+
+# Support alternative yum -- in future Fedora 'dnf' will become the
+# only supported installer, but for now 'yum' and 'dnf' are both
+# available in parallel with compatible CLIs.  Allow manual switching
+# till we get to the point we need to handle this automatically
+YUM=${YUM:-yum}
+
+# Common Configuration
+# --------------------
+
+# Whether to enable the debug log level in OpenStack services
+ENABLE_DEBUG_LOG_LEVEL=$(trueorfalse True ENABLE_DEBUG_LOG_LEVEL)
+
+ENABLE_VERBOSE=$(trueorfalse True ENABLE_VERBOSE)
+
+# SERVICE IP version
+# This is the IP version that services should be listening on, as well
+# as using to register their endpoints with keystone.
+SERVICE_IP_VERSION=4
+
+if [[ "$SERVICE_IP_VERSION" == 4 ]]; then
+    DEF_SERVICE_HOST=$HOST_IP
+    DEF_SERVICE_LOCAL_HOST=127.0.0.1
+    DEF_SERVICE_LISTEN_ADDRESS=0.0.0.0
+fi
+
+# This is either 0.0.0.0 for IPv4 or :: for IPv6
+SERVICE_LISTEN_ADDRESS=${SERVICE_LISTEN_ADDRESS:-${DEF_SERVICE_LISTEN_ADDRESS}}
+
+# Allow the use of an alternate hostname (such as localhost/127.0.0.1) for
+# service endpoints.  Default is dependent on SERVICE_IP_VERSION above.
+SERVICE_HOST=${SERVICE_HOST:-${DEF_SERVICE_HOST}}
+# This is either 127.0.0.1 for IPv4 or ::1 for IPv6
+SERVICE_LOCAL_HOST=${SERVICE_LOCAL_HOST:-${DEF_SERVICE_LOCAL_HOST}}
+
+REGION_NAME=${REGION_NAME:-RegionOne}
+
+# Configure services to use syslog instead of writing to individual log files
+SYSLOG=$(trueorfalse False SYSLOG)
+SYSLOG_HOST=${SYSLOG_HOST:-$HOST_IP}
+SYSLOG_PORT=${SYSLOG_PORT:-516}
+
+# Use color for logging output (only available if syslog is not used)
+LOG_COLOR=$(trueorfalse True LOG_COLOR)
+LOG_DIR=${LOG_DIR:-/var/log}
+
+VOLUME_BACKING_FILE_SIZE=${VOLUME_BACKING_FILE_SIZE:-10250M}
